@@ -1,0 +1,26 @@
+\begin{tabular}{lllllll}
+\toprule
+{} & AMZN & AAPL & META & GOOGL & MSFT & NFLX \\
+\midrule
+Log Return - ADF             &  Yes &  Yes &  Yes &   Yes &  Yes &  Yes \\
+Log Return - KPSS            &  Yes &  Yes &  Yes &   Yes &  Yes &  Yes \\
+ln(|ATTN|) - ADF             &  Yes &  Yes &  Yes &   Yes &  Yes &  Yes \\
+ln(|ATTN|) - KPSS            &  Yes &   No &  Yes &    No &  Yes &   No \\
+ln(|SENT|) - ADF             &  Yes &  Yes &  Yes &   Yes &  Yes &  Yes \\
+ln(|SENT|) - KPSS            &   No &   No &  Yes &   Yes &  Yes &   No \\
+ATTN*SENT - ADF              &  Yes &   No &  Yes &   Yes &  Yes &  Yes \\
+ATTN*SENT - KPSS             &   No &   No &  Yes &   Yes &  Yes &   No \\
+ln(|deltaATTN|) - ADF        &  Yes &  Yes &  Yes &   Yes &  Yes &   No \\
+ln(|deltaATTN|) - KPSS       &  Yes &   No &  Yes &    No &  Yes &   No \\
+ln(|deltaSENT|) - ADF        &  Yes &  Yes &  Yes &   Yes &  Yes &  Yes \\
+ln(|deltaSENT|) - KPSS       &   No &   No &  Yes &   Yes &  Yes &  Yes \\
+deltaATTN*deltaSENT - ADF    &  Yes &   No &  Yes &   Yes &  Yes &  Yes \\
+deltaATTN*deltaSENT - KPSS   &   No &   No &  Yes &   Yes &  Yes &   No \\
+ln(|\%deltaATTN|) - ADF       &  Yes &  Yes &  Yes &   Yes &  Yes &  Yes \\
+ln(|\%deltaATTN|) - KPSS      &  Yes &  Yes &  Yes &   Yes &  Yes &  Yes \\
+ln(|\%deltaSENT|) - ADF       &  Yes &  Yes &  Yes &   Yes &  Yes &  Yes \\
+ln(|\%deltaSENT|) - KPSS      &  Yes &   No &  Yes &   Yes &  Yes &  Yes \\
+\%deltaATTN*\%deltaSENT - ADF  &  Yes &  Yes &  Yes &   Yes &  Yes &  Yes \\
+\%deltaATTN*\%deltaSENT - KPSS &  Yes &  Yes &  Yes &   Yes &  Yes &  Yes \\
+\bottomrule
+\end{tabular}
