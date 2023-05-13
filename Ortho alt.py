@@ -1,0 +1,359 @@
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import math as math 
+import matplotlib.pyplot as plt
+import datetime as dt
+import scipy.linalg as la
+import scipy.optimize as optimize
+
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+
+#Linear 
+from sklearn.linear_model import LinearRegression
+from sklearn.decomposition import PCA
+from sklearn import linear_model
+
+from datetime import date
+from pandas import ExcelWriter
+
+
+
+##Dividing the data
+directory = "C:/Users/User/OneDrive - CBS - Copenhagen Business School/CBS/MSc in EBA -FIN/MasterThesisPython"
+tickers = ["AMZN","AAPL","META","GOOGL","MSFT", "NFLX"]
+
+filepath = directory+"/Data/Orthogonal-Data.xlsx"
+macro_data = pd.read_excel(filepath, index_col=0,engine =None)
+macro_data = macro_data.drop('USREC', axis = 1)
+
+
+#Reading the data
+def read_data(r, freq):
+    file = directory+"/18 CSVs - Final/"+tickers[r]+" - "+freq+".csv"
+    data = pd.read_csv(file,index_col=0,engine=None)
+    data = data.reset_index()
+    data['Date'] = pd.to_datetime(data['Date'])
+    data['Date'] = data['Date'].dt.strftime('%Y-%m-%d')
+    data = data.set_index('Date')
+    return data
+
+#Reading in all the data
+def read_raw(r,freq):
+    file = directory+"/SavedData/allFilesRaw"+freq+".xlsx"
+    raw = pd.read_excel(file,index_col=0,engine=None,sheet_name = tickers[r])
+    return raw
+
+#Saving the file
+def save_xls(df, label, xls_path):
+    with ExcelWriter(xls_path)as writer:
+        df.to_excel(writer, sheet_name=label)
+
+#Standardizing
+def standardize(df):
+    dfs = (df-df.mean())/(df.std())
+    return dfs
+
+#Getting the lags
+def data_lag(data,list):
+    dat = pd.DataFrame(index=data.iloc[1:,].index)
+    colu = list
+    for i in range(len(colu)):
+        dat[list[i]] = np.array(data.iloc[1:,i])
+        dat[list[i]+" 1 lag"] = np.array(data.iloc[:-1,i])
+    return dat
+
+#Function to get the index position of a given value
+def get_index(array,value):
+    for i in range(len(array)):
+        if array[i] == value:
+            break
+    return i
+
+#Function to get the principal component of given dataset
+def get_pc_one(data):
+    pca = PCA(n_components = len(data.columns)).fit(data)
+    var = pca.explained_variance_[0]
+    pca_one = pca.components_[0]
+    '''
+#Enforcing kaizer rule
+    for i in range(1,len(pca.components_)):
+        if pca.explained_variance_[i]>1:
+            var+= pca.explained_variance_[i]
+            pca_one+= pca.components_[i]
+    '''
+    ratio = np.matmul(data, pca_one.T)
+    return np.array(ratio), var, pca_one
+
+#Get the correlation of each variable and lag to the created ratio
+def get_corrs(data):
+    corrs = []
+    cor = data.corr(numeric_only=False)
+    for i in range(len(data.iloc[0,:])-1):
+        cr = cor.iloc[-1,i]
+        corrs.append(cr)
+    return corrs
+
+#Function to find the column of each pair with the highest absolute value of correlation
+def get_columns(array):
+    col_ind = []
+    for i in range(int(len(array)/2)):
+        one = abs(array[2*i])
+        two = abs(array[2*i+1])
+        if one >= two:
+            col_ind.append(2*i)
+        else: 
+            col_ind.append(2*i+1)
+    return col_ind
+
+#Retrieving the chosen columns from the dataset 
+def get_cols(data):
+    corrs = get_corrs(data)
+    col_inds = get_columns(corrs)
+    cols = data.columns
+    colss = []
+    for i in range(len(col_inds)):
+        ci = col_inds[i]
+        col = cols[ci]
+        colss.append(col)
+    return colss, corrs
+ 
+#Rebalancing our ratio to get a standard deviation of 1 
+def optimizing(data, pca, ratio):
+    def correlation(x):
+        new_ratio = np.matmul(data,x.T)
+        df = pd.DataFrame(index = new_ratio.index)
+        df["New Ratio"] = new_ratio
+        df['Old Ratio'] = ratio
+        cor = df.corr(numeric_only=False)
+        corr = cor.iloc[1,0]
+        return corr*-1
+    cons = ({'type': 'eq', 'fun': lambda x: np.matmul(data,x).std()-1})
+    res = optimize.minimize(fun=correlation, x0=pca, method='SLSQP', options ={'ftol': 1e-9}, constraints=cons)
+    new_pca = res.x
+    result = np.matmul(data,new_pca)
+    return np.array(result)
+
+#Getting our ratio
+def get_ratio(data,list):
+    dat = data_lag(data,list)
+    dat['Ratio'], var_one, pca_one = get_pc_one(dat)
+    datta = pd.DataFrame(dat)
+    cols, corrs = get_cols(dat)
+    dat = dat[cols]
+    dat_ratio, var_two, pca_two = get_pc_one(dat)
+    new_ratio = optimizing(dat,pca_two,dat_ratio)
+    dat['NewRatio'] = np.nan
+    for i in range(len(dat)):
+        dat.iloc[i,-1] = new_ratio[i]
+    df =pd.DataFrame(dat['NewRatio'])
+    df['old_ratio'] = datta['Ratio']
+    cor = df.corr(numeric_only=False)
+    pca = [pca_one,pca_two]
+    return new_ratio, var_one, var_two, cor.iloc[1,0], corrs, pca
+
+#Getting abnomal SVI 
+def abnormal(column, periods):
+    col = [None]*periods
+    for i in range(periods,len(column)):
+        x = column.iloc[i]
+        y = np.median(column.iloc[i-5:i])
+        z = math.log(x/y)
+        col.append(z)
+    return col
+
+#Detreding trading volume 
+def ratio_tv(columns):
+    col = []
+    for i in range(len(columns)):
+        z = columns.iloc[i,0]/columns.iloc[i,-1]
+        col.append(z)
+    return col
+
+#Detrending the attention data 
+def detrending_one(data):
+    dat = pd.DataFrame(data.loc[:,:])
+    dat['ATV'] = np.nan
+    #dat['ASVI'] = np.nan
+    array1 = ratio_tv(data[['TV','SHOUT']])
+    #array2 = abnormal(data.loc[:,'SVI'],5)
+    for i in range(len(dat)):
+        dat.iloc[i,-1] = array1[i]
+        #dat.iloc[i,-1] = array2[i]
+    #dat = dat.drop('SVI',axis = 1)
+    dat = dat.drop('TV',axis = 1)
+    dat = dat.drop('SHOUT',axis = 1)
+    return dat
+
+r = 0
+frequency = "Monthly"
+rawdata = read_data(r,frequency)
+rawdata['MTR'] = rawdata['TV']/rawdata['SHOUT']
+list1 = attention_list
+list2 = sentiment_list
+ortho = []
+for i in range(len(list1)):
+    ortho.append(list1[i])
+ortho.extend(list2)
+data = rawdata[ortho]
+column = data.iloc[:-1,0]
+
+
+#Regressing over our macrodata
+def create_ortho(column):
+    x1 = np.array(macro_data.iloc[1:,0]).reshape((-1,1))
+    x2 = np.array(macro_data.iloc[1:,1]).reshape((-1,1))
+    x3 = np.array(macro_data.iloc[1:,2]).reshape((-1,1))
+    x4 = np.array(macro_data.iloc[1:,3]).reshape((-1,1))
+    x = np.hstack((x1, x2, x3, x4))
+    y = np.array(column)
+    
+    x = sm.add_constant(x)
+    
+    model = sm.OLS(y,x)
+    model_fit = model.fit()
+    print(model_fit.summary())
+    betas = model_fit.params
+    print(1)
+    print(betas)
+    print(1)
+    df = pd.DataFrame(index= macro_data.iloc[1:,:].index)
+    df['Constant'] = 1
+    df[macro_data.columns[0]] = x1
+    df[macro_data.columns[1]] = x2
+    df[macro_data.columns[2]] = x3
+    df[macro_data.columns[3]] = x4
+    df['Actual'] = y
+    df['Predicted'] = np.matmul(x,betas)
+    df['Res'] = df['Actual'] -df['Predicted']
+    return np.array(df['Res'] )
+
+#Function to orgonalize 
+def orthogonalizing(data):
+    cols = data.columns
+    df =pd.DataFrame(index = data.iloc[0:-1,0].index, columns = cols)
+    for i in range(len(cols)):
+        df[cols[i]] = create_ortho(data.iloc[:-1,i])
+    return df
+
+#Getting the ratio indexes for the datasat split into sentiment and attention
+def get_pca_split_new(rawdata,list1,list2):
+
+#Orthogonalizing the data
+    ortho = []
+    for i in range(len(list1)):
+        ortho.append(list1[i])
+    ortho.extend(list2)
+    orthodata = orthogonalizing(rawdata[ortho])
+    ortho_raw.append(orthodata)
+#Attention with option 1
+
+    df_at = orthodata[list1]
+    df_at_de = df_at.iloc[1:,:]
+    df_at_de = df_at_de[df_at_de.index >= mindate]
+    df_at_de = df_at_de.diff()
+    data_att = standardize(df_at_de.iloc[1:,:])
+    attention, v1_at, v2_at, co_at, corrs_at, pca_a = get_ratio(data_att,data_att.columns)
+
+#Sentiment
+    df_se = orthodata[list2].iloc[1:,:]
+    df_se = df_se[df_se.index >= mindate]
+    df_se = df_se.diff()
+    data_sent = standardize(df_se.iloc[1:,:])
+    sentiment, v1_se, v2_se, co_sent, corrs_se, pca_s =  get_ratio(data_sent,list2)
+
+    vars = [v1_at, v2_at, v1_se, v2_se]
+    cor = [f"att: {co_at}",f"sent: {co_sent}"]
+    corrs = [corrs_at, corrs_se]
+    pcas = [pca_a,pca_s]
+    return attention, sentiment, vars, cor, corrs, pcas
+
+#Combining the data 
+def combined_data(r,freq, list1, list2):
+    frequency = freq
+    #rawdata = read_raw(r,frequency)
+    rawdata = read_data(r,frequency)
+    rawdata['MTR'] = rawdata['TV']/rawdata['SHOUT']
+    ratio_att, ratio_sent, vars, cors, corrs, pca = get_pca_split_new(rawdata, list1, list2)
+    df = pd.DataFrame(rawdata.iloc[-len(ratio_att):,0])
+    df["Delta Price"] = df['Price'].diff()
+    df['ATTN'] = ratio_att
+    df['SENT'] = ratio_sent  
+    df['Log Return'] = np.nan
+    df['Delta ATTN'] = df['ATTN'].diff()
+    df['Delta SENT'] = df['SENT'].diff()
+    df['Return'] = np.nan
+    df['%Delta ATTN'] = np.nan
+    df['%Delta SENT'] = np.nan
+    for i in range(1,len(df)):
+        old = df.iloc[i-1,0]
+        new = df.iloc[i,0]
+        df.iloc[i,4] = math.log(new/old)
+        df.iloc[i,-3] = (new-old)/old
+        df.iloc[i,-2] = df.iloc[i,5]/df.iloc[i-1,2]
+        df.iloc[i,-1] = df.iloc[i,6]/df.iloc[i-1,3]
+    df = df.drop('Price', axis = 1)
+    return df, cors, corrs, pca
+
+#Minimum date    
+mindate = dt.datetime(2015, 2, 1)
+mindate = mindate.strftime('%Y-%m-%d')
+
+#Listing all variables 
+tvl = 'TV'
+tpc = 'TC'
+tpsc = 'TPC'
+tnsc = 'TNC'
+npc = 'NC'
+npsc = 'NPC'
+nnsc = 'NNC'
+si = 'SI'
+sir = 'SIR'
+ivm = 'VMP'
+pcr = 'PCR'
+ti = 'SVI - T'
+sna = 'SVI - S'
+svi = 'SVI'
+sho = 'SHOUT'
+mtr = 'MTR'
+
+#Sentiment
+sentiment_list = [tpsc, tnsc, npsc, nnsc, pcr, ivm]
+attention_list = [mtr, tpc, npc, svi]
+
+#Frequencies
+frequencies = ["Daily","Weekly","Monthly"]   
+
+#Collecting our data
+finaldata = []
+finaltickers = []
+correlations = []
+ortho_raw = []
+
+for i in range(6):
+    frequency = "Monthly"
+    ticker = tickers[i]+" "+frequency
+    print(ticker)
+    df, cor, corr, pcas = combined_data(i,frequency,attention_list,sentiment_list)
+
+
+#Gathering the correlations
+    c1 = ticker +" "+cor[0]
+    c2 = ticker +" "+cor[1]
+    correlations.append(c1)
+    correlations.append(c2)
+
+
+#Appending our data to lists 
+    finaltickers.append(ticker)
+    finaldata.append(df)
+
+for i in range(len(finaldata)):
+    filepath = directory+"/Orthogonalized/"+tickers[i]+"Ratios.xlsx"
+    save_xls(finaldata[i],finaltickers[i],filepath) 
+
+for i in range(len(finaldata)):
+    filepath = directory+"/Orthogonalized/"+tickers[i]+"Raw.xlsx"
+    save_xls(ortho_raw[i],finaltickers[i],filepath) 
+
